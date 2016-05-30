@@ -52,6 +52,7 @@
 #include "TH1.h"
 #include "TProfile.h"
 #include "TProfile2D.h"
+#include "TLorentzVector.h"
 using namespace std;
 using namespace edm;
 using namespace reco;
@@ -101,6 +102,7 @@ private:
     TH2D * h_cel_vs_Z;
     TH2D * h_cel_vs_XY;
 
+    TH1F * h_betaGamma;
     TH1F * h_recHitE_100;
     TH1F * h_recHitE_200;
     TH1F * h_recHitE_300;
@@ -135,6 +137,12 @@ private:
     TProfile* tp_EoP_hitTrack_vsR;
     TProfile* tp_EoP_hitTrack_vsType;
     TProfile* tp_frac_recHitWithTime_vsType;
+
+    TProfile* tp_recOsim_vsfC;
+    TH2F* h2_recOsim_vsfC;
+    TProfile* tp_EoP_hitTrack_vsFfC;
+    TH2F* h2_EoP_hitTrack_vsFfC;
+    
     //vs gen
     TH1F* h_EoP_genAss;
     TProfile* tp_EoP_genAss_vsP;
@@ -218,7 +226,7 @@ HydraCalibrator::HydraCalibrator( const ParameterSet &iConfig ) :
     h_cel_vs_Z   = fs->make<TH2D>("h_cel_vs_Z","h_cel_vs_Z",820,-410,410,500,0,500);
     h_cel_vs_XY	 = fs->make<TH2D>("h_cel_vs_XY","h_cel_vs_XY",300,-150,150,300,-150,150);
 
-
+    h_betaGamma = fs->make<TH1F>("h_betaGamma", "", 1000, 0., 1000.);
     h_recHitE_100 = fs->make<TH1F>("h_recHitE_100", "", 300, 0., 30.);
     h_recHitE_200 = fs->make<TH1F>("h_recHitE_200", "", 300, 0., 30.);
     h_recHitE_300 = fs->make<TH1F>("h_recHitE_300", "", 300, 0., 30.);
@@ -257,6 +265,13 @@ HydraCalibrator::HydraCalibrator( const ParameterSet &iConfig ) :
     tp_EoP_hitTrack_vsR = fs->make<TProfile>("tp_EoP_hitTrack_vsR", "", 200, 0., 200.);
     tp_EoP_hitTrack_vsType = fs->make<TProfile>("tp_EoP_hitTrack_vsType", "", 3, 100., 400.);
     tp_frac_recHitWithTime_vsType = fs->make<TProfile>("tp_frac_recHitWithTime_vsType", "", 3, 100., 400.);
+
+    tp_recOsim_vsfC = fs->make<TProfile>("tp_recOsim_vsfC", "", 1000, 0., 1000.);
+    h2_recOsim_vsfC = fs->make<TH2F>("h2_recOsim_vsfC", "", 1000, 0., 1000., 1000, 0., 10e6);
+
+    tp_EoP_hitTrack_vsFfC = fs->make<TProfile>("tp_EoP_hitTrack_vsFfC", "", 1000, 0., 1.);
+    h2_EoP_hitTrack_vsFfC = fs->make<TH2F>("h2_EoP_hitTrack_vsFfC", "", 1000, 0., 1., 200, -0.5, 1.5);
+
 
     //TH2F
     h2_EoP_hitTrack_vsP = fs->make<TH2F>("h2_EoP_hitTrack_vsP", "", 400, 0., 400., 200, -0.5, 1.5);
@@ -384,6 +399,9 @@ void HydraCalibrator::produce( Event &iEvent, const EventSetup& iSetup)
         int nTotRecHit = 0;
         int nTimeRecHit = 0;
 
+        int overfC = 0;
+        int allfC = 0;
+
         float timeSeed = -1.;
         float energySeed = -1.;
         int layerSeed = -1;
@@ -503,11 +521,27 @@ void HydraCalibrator::produce( Event &iEvent, const EventSetup& iSetup)
                             // std::cout << " >>> nTotRecHit = " << nTotRecHit << std::endl;
                             // std::cout << " >>> nTimeRecHit = " << nTimeRecHit << std::endl;
 
-
+                            TLorentzVector muonV;
+                            muonV.SetPtEtaPhiE(currentTrack->momentum().Pt(), currentTrack->momentum().Eta(), 
+                                               currentTrack->momentum().Phi(), currentTrack->momentum().E());
+                            h_betaGamma->Fill(muonV.Beta() * muonV.Gamma());
                             //to extract fC2MIP
-                            if(detBlock == "100") h_recHitE_100->Fill(amplitude);
-                            if(detBlock == "200") h_recHitE_200->Fill(amplitude);
-                            if(detBlock == "300") h_recHitE_300->Fill(amplitude);
+                            //                            if(muonV.Beta() * muonV.Gamma() > 3 && muonV.Beta() * muonV.Gamma() <  4){
+                                if(detBlock == "100") h_recHitE_100->Fill(amplitude);
+                                if(detBlock == "200") h_recHitE_200->Fill(amplitude);
+                                if(detBlock == "300") h_recHitE_300->Fill(amplitude);
+                                //                            }
+
+                                float recCharge = amplitude*1.25;
+                                if(cellThickness == 2) recCharge = amplitude*2.57;
+                                if(cellThickness == 3) recCharge = amplitude*3.88;
+                                
+                                if(recCharge > 60.) ++overfC;
+                                ++allfC;
+
+                                tp_recOsim_vsfC->Fill( recCharge, recCharge / (result.first)->energy());
+                                h2_recOsim_vsfC->Fill(recCharge, recCharge / (result.first)->energy());
+
 
                             //dEdX_act[detBlock] =  dedX in Si of correct thickness
                             //                            float nMIPinTheLayer = amplitude * mipCalib_.GetAct_fC2MIP(detBlock);
@@ -657,6 +691,16 @@ void HydraCalibrator::produce( Event &iEvent, const EventSetup& iSetup)
         if(seedDet == 100) h_EoP_hitTrack_100->Fill(sumCalibRecHit / currentTrack->momentum().E());
         if(seedDet == 200) h_EoP_hitTrack_200->Fill(sumCalibRecHit / currentTrack->momentum().E());
         if(seedDet == 300) h_EoP_hitTrack_300->Fill(sumCalibRecHit / currentTrack->momentum().E());
+
+        // float seedCharge = energySeed*1.25;
+        // if(seedDet == 200) seedCharge = energySeed*2.57;
+        // if(seedDet == 300) seedCharge = energySeed*3.88;
+
+        float fractionO60fC = 1. * overfC / allfC;
+
+        tp_EoP_hitTrack_vsFfC->Fill(fractionO60fC, sumCalibRecHit / currentTrack->momentum().E());
+        h2_EoP_hitTrack_vsFfC->Fill(fractionO60fC, sumCalibRecHit / currentTrack->momentum().E());
+
 
         tp_EoP_hitTrack_vsP->Fill(currentTrack->momentum().E(), sumCalibRecHit / currentTrack->momentum().E());
         tp_EoP_hitTrack_vsPt->Fill(currentTrack->momentum().Pt(), sumCalibRecHit / currentTrack->momentum().E()); 
